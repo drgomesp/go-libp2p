@@ -36,6 +36,7 @@ type config struct {
 	connectionGater  connmgr.ConnectionGater
 	rcmgr            network.ResourceManager
 	sk               crypto.PrivKey
+	swarmOpts        []swarm.Option
 	clock
 }
 
@@ -56,6 +57,12 @@ type Option func(*testing.T, *config)
 func WithClock(clock clock) Option {
 	return func(_ *testing.T, c *config) {
 		c.clock = clock
+	}
+}
+
+func WithSwarmOpts(swarmOpts []swarm.Option) Option {
+	return func(_ *testing.T, c *config) {
+		c.swarmOpts = swarmOpts
 	}
 }
 
@@ -144,7 +151,8 @@ func GenSwarm(t *testing.T, opts ...Option) *swarm.Swarm {
 	ps.AddPrivKey(id, priv)
 	t.Cleanup(func() { ps.Close() })
 
-	swarmOpts := []swarm.Option{swarm.WithMetrics(metrics.NewBandwidthCounter())}
+	swarmOpts := cfg.swarmOpts
+	swarmOpts = append(swarmOpts, swarm.WithMetrics(metrics.NewBandwidthCounter()))
 	if cfg.connectionGater != nil {
 		swarmOpts = append(swarmOpts, swarm.WithConnectionGater(cfg.connectionGater))
 	}

@@ -11,12 +11,14 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	testutil "github.com/libp2p/go-libp2p/core/test"
+	"github.com/libp2p/go-libp2p/p2p/net/swarm"
 	. "github.com/libp2p/go-libp2p/p2p/net/swarm"
 	swarmt "github.com/libp2p/go-libp2p/p2p/net/swarm/testing"
 
 	"github.com/libp2p/go-libp2p-testing/ci"
 
 	ma "github.com/multiformats/go-multiaddr"
+	madns "github.com/multiformats/go-multiaddr-dns"
 	manet "github.com/multiformats/go-multiaddr/net"
 	"github.com/stretchr/testify/require"
 )
@@ -36,6 +38,44 @@ func TestBasicDialPeer(t *testing.T) {
 	s2 := swarms[1]
 
 	s1.Peerstore().AddAddrs(s2.LocalPeer(), s2.ListenAddresses(), peerstore.PermanentAddrTTL)
+
+	c, err := s1.DialPeer(context.Background(), s2.LocalPeer())
+	require.NoError(t, err)
+
+	s, err := c.NewStream(context.Background())
+	require.NoError(t, err)
+	s.Close()
+}
+
+func TestBasicDialPeerWithResolver(t *testing.T) {
+	t.Parallel()
+
+	mockResolver := madns.MockResolver{IP: make(map[string][]net.IPAddr)}
+	ipaddr, err := net.ResolveIPAddr("ip4", "127.0.0.1")
+	require.NoError(t, err)
+	mockResolver.IP["example.com"] = []net.IPAddr{*ipaddr}
+	resolver, err := madns.NewResolver(madns.WithDomainResolver("example.com", &mockResolver))
+	require.NoError(t, err)
+
+	swarms := makeSwarms(t, 2, swarmt.WithSwarmOpts([]swarm.Option{swarm.WithMultiaddrResolver(resolver)}))
+	defer closeSwarms(swarms)
+	s1 := swarms[0]
+	s2 := swarms[1]
+
+	// Change the multiaddr from /ip4/127.0.0.1/... to /dns4/example.com/... so
+	// that the resovler has to resolve this
+	var s2Addrs []ma.Multiaddr
+	for _, a := range s2.ListenAddresses() {
+		_, rest := ma.SplitFunc(a, func(c ma.Component) bool {
+			return c.Protocol().Code == ma.P_TCP || c.Protocol().Code == ma.P_UDP
+		},
+		)
+		if rest != nil {
+			s2Addrs = append(s2Addrs, ma.StringCast("/dns4/example.com").Encapsulate(rest))
+		}
+	}
+
+	s1.Peerstore().AddAddrs(s2.LocalPeer(), s2Addrs, peerstore.PermanentAddrTTL)
 
 	c, err := s1.DialPeer(context.Background(), s2.LocalPeer())
 	require.NoError(t, err)
